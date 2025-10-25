@@ -25,7 +25,9 @@ func init() {
 	rootCmd.AddCommand(cmd.DownloadSimpleCmd)
 	rootCmd.AddCommand(cmd.DownloadPlaylistCmd)
 	rootCmd.AddCommand(cmd.TranscribeCmd)
+	rootCmd.AddCommand(cmd.TranscribeWhisperCmd)
 	rootCmd.AddCommand(cmd.ProcessCmd)
+	rootCmd.AddCommand(cmd.PipelineCmd)
 }
 
 func main() {

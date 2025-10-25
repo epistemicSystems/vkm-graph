@@ -344,46 +344,99 @@
 (defn extract-facts-from-text
   "Extract structured facts from text using Claude API.
 
-   Returns a vector of fact maps."
-  [text & {:keys [api-key model]
+   Returns a vector of fact maps with enhanced error handling and retry logic."
+  [text & {:keys [api-key model max-retries]
            :or {api-key *claude-api-key*
-                model "claude-sonnet-4.5"}}]
-  (try
-    (let [prompt (str "Extract structured facts from the following text. "
-                     "For each fact, provide:\n"
-                     "- text: the claim\n"
-                     "- confidence: how certain (0-1)\n"
-                     "- topic: a keyword categorization\n\n"
-                     "Text:\n" text "\n\n"
-                     "Return as JSON array: [{\"text\": \"...\", \"confidence\": 0.8, \"topic\": \"scaling\"}]")
+                model "claude-sonnet-4-20250514"
+                max-retries 3}}]
+  (if (or (nil? api-key) (str/blank? api-key))
+    (do
+      (log/warn "CLAUDE_API_KEY not set, returning empty facts")
+      [])
+    (letfn [(attempt [retry-count]
+              (try
+                (let [prompt (str "You are a knowledge extraction system for a temporal knowledge graph. "
+                                 "Extract structured factual claims from the following text.\n\n"
+                                 "For each fact, provide:\n"
+                                 "- text: A clear, atomic claim (one fact per entry)\n"
+                                 "- confidence: Your certainty this is factual (0.0-1.0)\n"
+                                 "- topic: A single keyword category (e.g., 'scaling', 'architecture', 'performance')\n\n"
+                                 "Guidelines:\n"
+                                 "- Break complex statements into atomic facts\n"
+                                 "- Only extract verifiable claims, not opinions\n"
+                                 "- Use confidence < 0.6 for uncertain claims\n"
+                                 "- Keep text concise and clear\n\n"
+                                 "Text to analyze:\n---\n" text "\n---\n\n"
+                                 "Respond ONLY with a valid JSON array, nothing else:\n"
+                                 "[{\"text\": \"...\", \"confidence\": 0.85, \"topic\": \"scaling\"}]")
 
-          response (http/post "https://api.anthropic.com/v1/messages"
-                             {:headers {"x-api-key" api-key
-                                       "anthropic-version" "2023-06-01"
-                                       "Content-Type" "application/json"}
-                              :body (json/generate-string
-                                    {:model model
-                                     :max_tokens 4000
-                                     :messages [{:role "user"
-                                                :content prompt}]})
-                              :as :json})
+                      response (http/post "https://api.anthropic.com/v1/messages"
+                                         {:headers {"x-api-key" api-key
+                                                   "anthropic-version" "2023-06-01"
+                                                   "Content-Type" "application/json"}
+                                          :body (json/generate-string
+                                                {:model model
+                                                 :max_tokens 4096
+                                                 :temperature 0.0
+                                                 :messages [{:role "user"
+                                                            :content prompt}]})
+                                          :as :json
+                                          :socket-timeout 30000
+                                          :connection-timeout 10000})
 
-          content (get-in response [:body :content 0 :text])
+                      content (get-in response [:body :content 0 :text])
 
-          ;; Parse JSON from Claude's response
-          facts-data (json/parse-string content true)]
+                      ;; Extract JSON from markdown code blocks if present
+                      json-str (if (str/includes? content "```")
+                                 (second (re-find #"```(?:json)?\s*\n([\s\S]*?)\n```" content))
+                                 content)
 
-      ;; Convert to fact maps
-      (map (fn [fact-data]
-            (patch/make-fact
-             {:text (:text fact-data)
-              :confidence (:confidence fact-data 0.5)
-              :topic (keyword (:topic fact-data "general"))}))
-          facts-data))
+                      ;; Parse JSON from Claude's response
+                      facts-data (json/parse-string (or json-str content) true)]
 
-    (catch Exception e
-      (log/error "Failed to extract facts from text:" (.getMessage e))
-      [])))
+                  (log/info "Extracted" (count facts-data) "facts from text")
+
+                  ;; Convert to fact maps
+                  (vec
+                   (map (fn [fact-data]
+                         (patch/make-fact
+                          {:text (:text fact-data)
+                           :confidence (or (:confidence fact-data) 0.5)
+                           :topic (keyword (or (:topic fact-data) "general"))}))
+                       facts-data)))
+
+                (catch clojure.lang.ExceptionInfo e
+                  (let [status (-> e ex-data :status)]
+                    (cond
+                      ;; Rate limit - wait and retry
+                      (= status 429)
+                      (if (< retry-count max-retries)
+                        (do
+                          (log/warn "Rate limited, retrying in" (* 2 retry-count) "seconds...")
+                          (Thread/sleep (* 2000 retry-count))
+                          (attempt (inc retry-count)))
+                        (do
+                          (log/error "Max retries exceeded for rate limiting")
+                          []))
+
+                      ;; Other HTTP errors
+                      :else
+                      (do
+                        (log/error "HTTP error" status ":" (.getMessage e))
+                        []))))
+
+                (catch com.fasterxml.jackson.core.JsonParseException e
+                  (log/error "Failed to parse JSON response from Claude:" (.getMessage e))
+                  [])
+
+                (catch Exception e
+                  (log/error "Failed to extract facts from text:" (.getMessage e))
+                  (when (< retry-count max-retries)
+                    (log/info "Retrying... (" (inc retry-count) "/" max-retries ")")
+                    (Thread/sleep 1000)
+                    (attempt (inc retry-count)))
+                  [])))]
+      (attempt 0))))
 
 ;; ============================================================
 ;; Example usage
