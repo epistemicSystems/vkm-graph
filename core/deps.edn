@@ -13,6 +13,14 @@
   clj-http/clj-http {:mvn/version "3.12.3"}
   http-kit/http-kit {:mvn/version "2.7.0"}
 
+  ;; HTTP server
+  ring/ring-core {:mvn/version "1.10.0"}
+  ring/ring-jetty-adapter {:mvn/version "1.10.0"}
+  ring/ring-json {:mvn/version "0.5.1"}
+  ring-cors/ring-cors {:mvn/version "0.1.13"}
+  compojure/compojure {:mvn/version "1.7.0"}
+  metosin/ring-http-response {:mvn/version "0.9.3"}
+
   ;; JSON/EDN handling
   cheshire/cheshire {:mvn/version "5.11.0"}
   org.clojure/data.json {:mvn/version "2.4.0"}
@@ -50,6 +58,10 @@
  {;; Run the main pipeline
   :run
   {:main-opts ["-m" "vkm.pipeline"]}
+
+  ;; Run HTTP API server
+  :server
+  {:main-opts ["-m" "vkm.api.server"]}
 
   ;; Run tests
   :test

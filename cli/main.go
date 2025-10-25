@@ -22,6 +22,8 @@ as morphisms that trace understanding evolution over time.`,
 func init() {
 	// Add subcommands
 	rootCmd.AddCommand(cmd.DownloadCmd)
+	rootCmd.AddCommand(cmd.DownloadSimpleCmd)
+	rootCmd.AddCommand(cmd.DownloadPlaylistCmd)
 	rootCmd.AddCommand(cmd.TranscribeCmd)
 	rootCmd.AddCommand(cmd.ProcessCmd)
 }
