@@ -1,0 +1,294 @@
+;; Datomic Schema for Knowledge Graph Evolution System
+;; This schema enables temporal queries and immutable history tracking
+
+[;; ============================================================
+ ;; Patch Attributes
+ ;; ============================================================
+
+ {:db/ident :patch/timestamp
+  :db/valueType :db.type/instant
+  :db/cardinality :db.cardinality/one
+  :db/doc "When this patch was created"
+  :db/index true}
+
+ {:db/ident :patch/source
+  :db/valueType :db.type/keyword
+  :db/cardinality :db.cardinality/one
+  :db/doc "Source type: :youtube-channel, :git-history, :document, :manual"}
+
+ {:db/ident :patch/source-id
+  :db/valueType :db.type/string
+  :db/cardinality :db.cardinality/one
+  :db/doc "Identifier for the source (e.g., channel ID)"}
+
+ {:db/ident :patch/video-batch
+  :db/valueType :db.type/ref
+  :db/cardinality :db.cardinality/many
+  :db/doc "References to videos processed in this batch"}
+
+ {:db/ident :patch/metadata
+  :db/valueType :db.type/string
+  :db/cardinality :db.cardinality/one
+  :db/doc "EDN-encoded metadata"}
+
+ ;; ============================================================
+ ;; Claim/Fact Attributes
+ ;; ============================================================
+
+ {:db/ident :claim/text
+  :db/valueType :db.type/string
+  :db/cardinality :db.cardinality/one
+  :db/fulltext true
+  :db/doc "The textual content of the claim"}
+
+ {:db/ident :claim/topic
+  :db/valueType :db.type/keyword
+  :db/cardinality :db.cardinality/one
+  :db/index true
+  :db/doc "Primary topic/category of this claim"}
+
+ {:db/ident :claim/confidence
+  :db/valueType :db.type/float
+  :db/cardinality :db.cardinality/one
+  :db/doc "Confidence level (0-1) of this assertion"}
+
+ {:db/ident :claim/extracted-from
+  :db/valueType :db.type/string
+  :db/cardinality :db.cardinality/one
+  :db/doc "Source identifier (e.g., video ID)"}
+
+ {:db/ident :claim/timestamp-in-video
+  :db/valueType :db.type/float
+  :db/cardinality :db.cardinality/one
+  :db/doc "Timestamp in source video (seconds)"}
+
+ {:db/ident :claim/valid-from
+  :db/valueType :db.type/instant
+  :db/cardinality :db.cardinality/one
+  :db/index true
+  :db/doc "When this claim became part of our understanding"}
+
+ {:db/ident :claim/revises
+  :db/valueType :db.type/ref
+  :db/cardinality :db.cardinality/one
+  :db/doc "Reference to previous version of this claim"}
+
+ {:db/ident :claim/tags
+  :db/valueType :db.type/keyword
+  :db/cardinality :db.cardinality/many
+  :db/doc "Tags for categorization"}
+
+ {:db/ident :claim/lod
+  :db/valueType :db.type/long
+  :db/cardinality :db.cardinality/one
+  :db/doc "Level of detail: 0=raw, 1=summary, 2=key-facts, 3=essence"}
+
+ {:db/ident :claim/patch
+  :db/valueType :db.type/ref
+  :db/cardinality :db.cardinality/one
+  :db/doc "Reference to the patch this claim belongs to"}
+
+ ;; ============================================================
+ ;; Edge Attributes
+ ;; ============================================================
+
+ {:db/ident :edge/from
+  :db/valueType :db.type/ref
+  :db/cardinality :db.cardinality/one
+  :db/doc "Source claim"}
+
+ {:db/ident :edge/to
+  :db/valueType :db.type/ref
+  :db/cardinality :db.cardinality/one
+  :db/doc "Target claim"}
+
+ {:db/ident :edge/relation
+  :db/valueType :db.type/keyword
+  :db/cardinality :db.cardinality/one
+  :db/index true
+  :db/doc "Type of relationship: :supports, :contradicts, :revises, etc."}
+
+ {:db/ident :edge/strength
+  :db/valueType :db.type/float
+  :db/cardinality :db.cardinality/one
+  :db/doc "Strength of this relationship (0-1)"}
+
+ {:db/ident :edge/patch
+  :db/valueType :db.type/ref
+  :db/cardinality :db.cardinality/one
+  :db/doc "Reference to the patch this edge belongs to"}
+
+ ;; ============================================================
+ ;; Embedding Attributes
+ ;; ============================================================
+
+ {:db/ident :embedding/claim
+  :db/valueType :db.type/ref
+  :db/cardinality :db.cardinality/one
+  :db/doc "Reference to the claim this embedding represents"}
+
+ {:db/ident :embedding/model
+  :db/valueType :db.type/string
+  :db/cardinality :db.cardinality/one
+  :db/doc "Embedding model used"}
+
+ {:db/ident :embedding/vector
+  :db/valueType :db.type/string
+  :db/cardinality :db.cardinality/one
+  :db/doc "EDN-encoded vector (array of floats)"}
+
+ ;; ============================================================
+ ;; Morphism Attributes
+ ;; ============================================================
+
+ {:db/ident :morphism/from
+  :db/valueType :db.type/ref
+  :db/cardinality :db.cardinality/one
+  :db/doc "Source patch"}
+
+ {:db/ident :morphism/to
+  :db/valueType :db.type/ref
+  :db/cardinality :db.cardinality/one
+  :db/doc "Target patch"}
+
+ {:db/ident :morphism/type
+  :db/valueType :db.type/keyword
+  :db/cardinality :db.cardinality/one
+  :db/index true
+  :db/doc "Type: :additive, :refinement, :reorganization, :refutation"}
+
+ {:db/ident :morphism/commit-hash
+  :db/valueType :db.type/string
+  :db/cardinality :db.cardinality/one
+  :db/doc "Git commit hash recording this transition"}
+
+ {:db/ident :morphism/timestamp
+  :db/valueType :db.type/instant
+  :db/cardinality :db.cardinality/one
+  :db/index true
+  :db/doc "When this transition occurred"}
+
+ {:db/ident :morphism/author
+  :db/valueType :db.type/string
+  :db/cardinality :db.cardinality/one
+  :db/doc "Who/what created this transition"}
+
+ {:db/ident :morphism/reason
+  :db/valueType :db.type/string
+  :db/cardinality :db.cardinality/one
+  :db/fulltext true
+  :db/doc "Human-readable explanation of this transition"}
+
+ {:db/ident :morphism/operations
+  :db/valueType :db.type/string
+  :db/cardinality :db.cardinality/one
+  :db/doc "EDN-encoded list of atomic operations"}
+
+ {:db/ident :morphism/delta
+  :db/valueType :db.type/string
+  :db/cardinality :db.cardinality/one
+  :db/doc "EDN-encoded summary statistics"}
+
+ {:db/ident :morphism/information-gain
+  :db/valueType :db.type/float
+  :db/cardinality :db.cardinality/one
+  :db/doc "How much this advanced understanding (0-1)"}
+
+ ;; ============================================================
+ ;; Motive Attributes
+ ;; ============================================================
+
+ {:db/ident :motive/concept-words
+  :db/valueType :db.type/string
+  :db/cardinality :db.cardinality/many
+  :db/fulltext true
+  :db/doc "Linguistic basis - concept words representing this motive"}
+
+ {:db/ident :motive/centroid
+  :db/valueType :db.type/string
+  :db/cardinality :db.cardinality/one
+  :db/doc "EDN-encoded semantic centroid"}
+
+ {:db/ident :motive/confidence
+  :db/valueType :db.type/float
+  :db/cardinality :db.cardinality/one
+  :db/doc "How consistently present across cluster"}
+
+ {:db/ident :motive/cluster-size
+  :db/valueType :db.type/long
+  :db/cardinality :db.cardinality/one
+  :db/doc "Number of facts in this cluster"}
+
+ {:db/ident :motive/members
+  :db/valueType :db.type/ref
+  :db/cardinality :db.cardinality/many
+  :db/doc "Claims belonging to this motive"}
+
+ {:db/ident :motive/created-at
+  :db/valueType :db.type/instant
+  :db/cardinality :db.cardinality/one
+  :db/index true
+  :db/doc "When this motive was extracted"}
+
+ ;; ============================================================
+ ;; Motive Morphism Attributes
+ ;; ============================================================
+
+ {:db/ident :motive-morphism/from
+  :db/valueType :db.type/ref
+  :db/cardinality :db.cardinality/one
+  :db/doc "Source motive"}
+
+ {:db/ident :motive-morphism/to
+  :db/valueType :db.type/ref
+  :db/cardinality :db.cardinality/one
+  :db/doc "Target motive"}
+
+ {:db/ident :motive-morphism/relation
+  :db/valueType :db.type/keyword
+  :db/cardinality :db.cardinality/one
+  :db/index true
+  :db/doc "Type: :generalizes, :specializes, :analogous, :contrasts, :enables"}
+
+ {:db/ident :motive-morphism/strength
+  :db/valueType :db.type/float
+  :db/cardinality :db.cardinality/one
+  :db/doc "Strength of this relationship (0-1)"}
+
+ ;; ============================================================
+ ;; Video Metadata (for tracking sources)
+ ;; ============================================================
+
+ {:db/ident :video/id
+  :db/valueType :db.type/string
+  :db/cardinality :db.cardinality/one
+  :db/unique :db.unique/identity
+  :db/doc "YouTube video ID"}
+
+ {:db/ident :video/title
+  :db/valueType :db.type/string
+  :db/cardinality :db.cardinality/one
+  :db/fulltext true
+  :db/doc "Video title"}
+
+ {:db/ident :video/channel-id
+  :db/valueType :db.type/string
+  :db/cardinality :db.cardinality/one
+  :db/index true
+  :db/doc "YouTube channel ID"}
+
+ {:db/ident :video/published-at
+  :db/valueType :db.type/instant
+  :db/cardinality :db.cardinality/one
+  :db/index true
+  :db/doc "When video was published"}
+
+ {:db/ident :video/transcript-path
+  :db/valueType :db.type/string
+  :db/cardinality :db.cardinality/one
+  :db/doc "Path to transcript JSON file"}
+
+ {:db/ident :video/processed-at
+  :db/valueType :db.type/instant
+  :db/cardinality :db.cardinality/one
+  :db/doc "When video was processed"}]
