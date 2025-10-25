@@ -1,0 +1,138 @@
+;; Configuration for Knowledge Graph Evolution System
+
+{:system
+ {:name "vkm-graph"
+  :version "0.1.0"
+  :env :development}  ;; :development, :staging, :production
+
+ ;; Claude API configuration
+ :claude
+ {:api-key #env CLAUDE_API_KEY
+  :model "claude-sonnet-4.5"
+  :max-tokens 4000
+  :temperature 0.7
+  :timeout-ms 60000}
+
+ ;; Embedding configuration
+ :embeddings
+ {:provider :openai  ;; :openai or :nomic
+  :api-key #env OPENAI_API_KEY
+  :model "text-embedding-3-small"
+  :dimensions 1536
+  :batch-size 100}
+
+ ;; Datomic configuration
+ :datomic
+ {:uri "datomic:mem://knowledge-graph"  ;; In-memory for development
+  ;; For production, use:
+  ;; :uri "datomic:dev://localhost:4334/knowledge-graph"
+  ;; or Datomic Cloud connection
+  :schema-path "resources/schema/datomic-schema.edn"}
+
+ ;; Git integration
+ :git
+ {:patches-repo-path "data/patches"
+  :auto-commit true
+  :commit-message-template "Update patch: {patch-id} - {reason}"}
+
+ ;; Ingestion pipeline
+ :ingestion
+ {:youtube
+  {:download-path "data/videos"
+   :transcript-path "data/transcripts"
+   :max-videos-per-batch 50
+   :video-quality "worst"  ;; For audio extraction, we don't need high quality
+   :audio-format "mp3"}
+
+  :whisper
+  {:model-size "base"  ;; tiny, base, small, medium, large
+   :language "en"
+   :device "cpu"  ;; or "cuda" for GPU
+   :fp16 false}  ;; Set to true for GPU
+
+  :fact-extraction
+  {:chunk-duration-minutes 10
+   :overlap-seconds 30
+   :confidence-threshold 0.5
+   :max-facts-per-chunk 20}}
+
+ ;; Semantic analysis
+ :semantic
+ {:clustering
+  {:method :community-detection  ;; :kmeans, :dbscan, :community-detection
+   :similarity-threshold 0.75
+   :min-cluster-size 3
+   :max-clusters 20}
+
+  :motive-extraction
+  {:linguistic-basis-size 5
+   :confidence-threshold 0.7
+   :min-intersection-coverage 0.6}
+
+  :tropical
+  {:target-dimension 3
+   :sample-density 10000
+   :gradient-tolerance 0.01}}
+
+ ;; Morphism computation
+ :morphism
+ {:information-gain
+  {:weight-new-facts 0.3
+   :weight-confidence-gain 0.3
+   :weight-new-motives 0.4
+   :weight-reorganization-penalty -0.1}
+
+  :equivalence-testing
+  {:num-tests 1000
+   :confidence-threshold 0.95
+   :random-seed 42}}
+
+ ;; Visualization
+ :visualization
+ {:layout :force-directed  ;; :force-directed, :hierarchical, :circular
+  :dimensions 2  ;; 2 or 3
+  :show-motives true
+  :show-motive-relationships true
+  :show-timeline true
+  :highlight-singularities true
+  :color-by :confidence  ;; :confidence, :topic, :information-gain
+  :size-by :time-extent  ;; :frequency, :time-extent, :cluster-size
+  :animation-duration-ms 500
+  :physics
+  {:charge-strength -300
+   :link-distance 100
+   :alpha-decay 0.02}}
+
+ ;; Storage paths
+ :storage
+ {:transcripts "data/transcripts"
+  :patches "data/patches"
+  :embeddings "data/embeddings"
+  :cache "data/cache"
+  :logs "data/logs"}
+
+ ;; Logging
+ :logging
+ {:level :info  ;; :debug, :info, :warn, :error
+  :format :json  ;; :json, :edn, :text
+  :output :file  ;; :console, :file, :both
+  :file-path "data/logs/system.log"
+  :max-file-size-mb 100
+  :max-files 10}
+
+ ;; Performance tuning
+ :performance
+ {:parallelism
+  {:fact-extraction 4
+   :embedding-computation 8
+   :clustering 4}
+
+  :caching
+  {:enable true
+   :ttl-minutes 60
+   :max-size-mb 1000}
+
+  :batch-sizes
+  {:facts 100
+   :embeddings 50
+   :patches 10}}}

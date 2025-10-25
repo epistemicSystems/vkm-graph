@@ -1,0 +1,232 @@
+;; Patch Schema Definition
+;; This defines the immutable structure of a knowledge patch
+
+{:patch/schema-version "1.0.0"
+
+ ;; Patch: Immutable configuration of knowledge at a point in time
+ :patch
+ {:db/id {:type :uuid
+          :required true
+          :doc "Unique identifier for this patch"}
+
+  :patch/timestamp {:type :instant
+                    :required true
+                    :doc "When this patch was created"}
+
+  :patch/source {:type :keyword
+                 :required true
+                 :allowed #{:youtube-channel :git-history :document :manual}
+                 :doc "Source type of this knowledge"}
+
+  :patch/source-id {:type :string
+                    :required false
+                    :doc "Identifier for the source (e.g., channel ID)"}
+
+  :patch/video-batch {:type :vector
+                      :required false
+                      :doc "List of videos processed in this batch"}
+
+  :patch/facts {:type :vector
+                :required true
+                :doc "Collection of claims/facts in this patch"}
+
+  :patch/edges {:type :vector
+                :required true
+                :doc "Relationships between facts"}
+
+  :patch/embeddings {:type :vector
+                     :required false
+                     :doc "Semantic embeddings for facts"}
+
+  :patch/metadata {:type :map
+                   :required false
+                   :doc "Additional metadata (LOD levels, processing logs, etc.)"}}
+
+ ;; Fact/Claim: A single assertion or piece of knowledge
+ :fact
+ {:db/id {:type :uuid
+          :required true
+          :doc "Unique identifier for this fact"}
+
+  :claim/text {:type :string
+               :required true
+               :doc "The textual content of the claim"}
+
+  :claim/topic {:type :keyword
+                :required false
+                :doc "Primary topic/category of this claim"}
+
+  :claim/confidence {:type :float
+                     :required true
+                     :min 0.0
+                     :max 1.0
+                     :doc "Confidence level (0-1) of this assertion"}
+
+  :claim/extracted-from {:type :string
+                         :required false
+                         :doc "Source identifier (e.g., video ID)"}
+
+  :claim/timestamp-in-video {:type :float
+                             :required false
+                             :doc "Timestamp in source video (seconds)"}
+
+  :claim/valid-from {:type :instant
+                     :required true
+                     :doc "When this claim became part of our understanding"}
+
+  :claim/revises {:type :uuid
+                  :required false
+                  :doc "Reference to previous version of this claim"}
+
+  :claim/tags {:type :vector
+               :required false
+               :doc "Tags for categorization"}
+
+  :claim/lod {:type :integer
+              :required false
+              :min 0
+              :max 3
+              :default 0
+              :doc "Level of detail: 0=raw, 1=summary, 2=key-facts, 3=essence"}}
+
+ ;; Edge: Relationship between facts
+ :edge
+ {:db/id {:type :uuid
+          :required true
+          :doc "Unique identifier for this edge"}
+
+  :edge/from {:type :uuid
+              :required true
+              :doc "Source fact ID"}
+
+  :edge/to {:type :uuid
+            :required true
+            :doc "Target fact ID"}
+
+  :edge/relation {:type :keyword
+                  :required true
+                  :allowed #{:supports :contradicts :revises :refines :generalizes :specializes :causes :correlates}
+                  :doc "Type of relationship"}
+
+  :edge/strength {:type :float
+                  :required true
+                  :min 0.0
+                  :max 1.0
+                  :doc "Strength of this relationship"}}
+
+ ;; Embedding: Vector representation for semantic operations
+ :embedding
+ {:embedding-id {:type :uuid
+                 :required true
+                 :doc "Unique identifier for this embedding"}
+
+  :claim-ref {:type :uuid
+              :required true
+              :doc "Reference to the claim this embedding represents"}
+
+  :model {:type :string
+          :required true
+          :doc "Embedding model used (e.g., text-embedding-3-small)"}
+
+  :vector {:type :vector
+           :required true
+           :doc "The embedding vector (array of floats)"}}
+
+ ;; Morphism: Transition from one patch to another
+ :morphism
+ {:db/id {:type :uuid
+          :required true
+          :doc "Unique identifier for this morphism"}
+
+  :morphism/from {:type :uuid
+                  :required true
+                  :doc "Source patch ID"}
+
+  :morphism/to {:type :uuid
+                :required true
+                :doc "Target patch ID"}
+
+  :morphism/type {:type :keyword
+                  :required true
+                  :allowed #{:additive :refinement :reorganization :refutation}
+                  :doc "Type of transition"}
+
+  :morphism/commit-hash {:type :string
+                         :required false
+                         :doc "Git commit hash recording this transition"}
+
+  :morphism/timestamp {:type :instant
+                       :required true
+                       :doc "When this transition occurred"}
+
+  :morphism/author {:type :string
+                    :required false
+                    :default "system"
+                    :doc "Who/what created this transition"}
+
+  :morphism/reason {:type :string
+                    :required false
+                    :doc "Human-readable explanation of this transition"}
+
+  :morphism/operations {:type :vector
+                        :required false
+                        :doc "List of atomic operations (add-fact, update-confidence, etc.)"}
+
+  :morphism/delta {:type :map
+                   :required false
+                   :doc "Summary statistics of changes"}
+
+  :morphism/information-gain {:type :float
+                              :required true
+                              :min 0.0
+                              :max 1.0
+                              :doc "How much this advanced understanding (0-1)"}}
+
+ ;; Motive: Essential concept extracted from a semantic cluster
+ :motive
+ {:id {:type :uuid
+       :required true
+       :doc "Unique identifier for this motive"}
+
+  :concept-words {:type :vector
+                  :required true
+                  :doc "Linguistic basis - concept words representing this motive"}
+
+  :centroid {:type :vector
+             :required true
+             :doc "Semantic centroid in embedding space"}
+
+  :confidence {:type :float
+               :required true
+               :min 0.0
+               :max 1.0
+               :doc "How consistently present across cluster"}
+
+  :cluster-size {:type :integer
+                 :required true
+                 :doc "Number of facts in this cluster"}
+
+  :member-claim-ids {:type :vector
+                     :required true
+                     :doc "IDs of claims belonging to this motive"}}
+
+ ;; Motive Morphism: Relationship between motives
+ :motive-morphism
+ {:from {:type :uuid
+         :required true
+         :doc "Source motive ID"}
+
+  :to {:type :uuid
+       :required true
+       :doc "Target motive ID"}
+
+  :relation {:type :keyword
+             :required true
+             :allowed #{:generalizes :specializes :analogous :contrasts :enables}
+             :doc "Type of relationship between motives"}
+
+  :strength {:type :float
+             :required true
+             :min 0.0
+             :max 1.0
+             :doc "Strength of this relationship"}}}
