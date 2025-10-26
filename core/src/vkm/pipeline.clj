@@ -162,50 +162,67 @@
     patch))
 
 ;; ============================================================
-;; Edge inference
+;; Edge inference - Enhanced AI
 ;; ============================================================
 
 (defn infer-edges
-  "Infer edges between facts based on semantic similarity and patterns.
+  "Infer edges between facts using enhanced AI:
+   1. Extract relationships using Claude
+   2. Detect contradictions
+   3. Find semantic duplicates
 
-   This is a simple implementation. In practice, use more sophisticated
-   relationship extraction."
+   Returns patch with edges populated."
   [patch config]
-  (let [facts (:patch/facts patch)
-        ;; For now, connect facts from the same topic
-        topic-groups (group-by :claim/topic facts)
+  (log/info "Inferring edges with enhanced AI...")
 
-        edges (apply concat
-                    (for [[topic group] topic-groups
-                          :when (> (count group) 1)]
-                      ;; Connect each fact to the next in the group
-                      (map (fn [f1 f2]
-                            (patch/make-edge
-                             {:from-id (:db/id f1)
-                              :to-id (:db/id f2)
-                              :relation :supports
-                              :strength 0.5}))
-                          group
-                          (rest group))))]
+  (let [;; Extract relationships using Claude
+        relationships (semantic/extract-relationships patch)
 
-    (assoc patch :patch/edges (vec edges))))
+        ;; Detect contradictions
+        contradictions (semantic/detect-contradictions patch)
+
+        ;; Combine all edges
+        all-edges (concat relationships contradictions)
+
+        ;; Add to patch
+        patch-with-edges (assoc patch :patch/edges (vec all-edges))]
+
+    (log/info "Inferred" (count relationships) "relationships and"
+             (count contradictions) "contradictions")
+
+    patch-with-edges))
+
+(defn deduplicate-patch
+  "Remove duplicate facts from patch using semantic similarity.
+
+   Returns cleaned patch with duplicates merged."
+  [patch config]
+  (log/info "Checking for duplicate facts...")
+
+  (let [duplicates (semantic/find-duplicates patch)
+        cleaned-patch (if (seq duplicates)
+                       (semantic/merge-duplicates patch duplicates)
+                       patch)]
+
+    cleaned-patch))
 
 ;; ============================================================
 ;; Complete pipeline
 ;; ============================================================
 
 (defn process-source
-  "Complete pipeline for processing a source.
+  "Complete pipeline for processing a source with Enhanced AI.
 
    Steps:
    1. Load transcripts
    2. Extract facts
    3. Build patch
    4. Add embeddings
-   5. Infer edges
-   6. Store in Datomic
-   7. Compute morphism (if previous patch exists)
-   8. Extract motives
+   5. Deduplicate facts (Enhanced AI)
+   6. Infer edges + detect contradictions (Enhanced AI)
+   7. Store in Datomic
+   8. Compute morphism (if previous patch exists)
+   9. Extract motives
 
    Returns the processed patch."
   [source-id transcript-dir & {:keys [config]
@@ -224,13 +241,16 @@
                         patch
                         :batch-size (get-in config [:embeddings :batch-size] 100))
 
-        ;; Step 5: Infer edges
-        patch-complete (infer-edges patch-with-emb config)
+        ;; Step 5: Deduplicate facts (Enhanced AI)
+        patch-dedup (deduplicate-patch patch-with-emb config)
 
-        ;; Step 6: Store in Datomic
+        ;; Step 6: Infer edges + contradictions (Enhanced AI)
+        patch-complete (infer-edges patch-dedup config)
+
+        ;; Step 7: Store in Datomic
         patch-id (db/store-patch! patch-complete)
 
-        ;; Step 7: Compute morphism if previous patch exists
+        ;; Step 8: Compute morphism if previous patch exists
         prev-patch-id (db/find-latest-patch source-id)
         morphism (when (and prev-patch-id (not= prev-patch-id patch-id))
                   (let [prev-patch (db/pull-patch prev-patch-id)
@@ -243,7 +263,7 @@
                     (db/store-morphism! morph)
                     morph))
 
-        ;; Step 8: Extract motives
+        ;; Step 9: Extract motives
         motives (semantic/extract-all-motives
                  patch-complete
                  :similarity-threshold (get-in config [:semantic :clustering :similarity-threshold] 0.75))

@@ -439,6 +439,307 @@
       (attempt 0))))
 
 ;; ============================================================
+;; Enhanced AI: Contradiction Detection
+;; ============================================================
+
+(defn detect-contradictions
+  "Detect contradicting facts using embeddings and Claude.
+
+   Returns a vector of contradiction relationships."
+  [patch & {:keys [similarity-threshold api-key]
+            :or {similarity-threshold 0.75
+                 api-key *claude-api-key*}}]
+  (if (or (nil? api-key) (str/blank? api-key))
+    []
+    (let [facts (:patch/facts patch)
+          embeddings (:patch/embeddings patch)
+
+          ;; Build fact-id -> embedding map
+          embedding-map (into {} (map (fn [emb]
+                                       [(:claim-ref emb) (:vector emb)])
+                                     embeddings))
+
+          ;; Find fact pairs with high semantic similarity (potential contradictions)
+          candidates (for [f1 facts
+                          f2 facts
+                          :when (not= (:db/id f1) (:db/id f2))
+                          :let [emb1 (get embedding-map (:db/id f1))
+                                emb2 (get embedding-map (:db/id f2))
+                                sim (when (and emb1 emb2) (cosine-similarity emb1 emb2))]
+                          :when (and sim (> sim similarity-threshold))]
+                      [f1 f2 sim])]
+
+      ;; Use Claude to verify contradictions
+      (log/info "Checking" (count candidates) "candidate pairs for contradictions")
+
+      (vec
+       (keep (fn [[f1 f2 sim]]
+               (try
+                 (let [prompt (str "Analyze if these two statements contradict each other.\n\n"
+                                  "Statement 1: " (:claim/text f1) "\n"
+                                  "Statement 2: " (:claim/text f2) "\n\n"
+                                  "Respond with JSON:\n"
+                                  "{\"contradicts\": true/false, "
+                                  "\"reason\": \"brief explanation\", "
+                                  "\"strength\": 0.0-1.0}")
+
+                       response (http/post "https://api.anthropic.com/v1/messages"
+                                          {:headers {"x-api-key" api-key
+                                                    "anthropic-version" "2023-06-01"
+                                                    "Content-Type" "application/json"}
+                                           :body (json/generate-string
+                                                 {:model "claude-sonnet-4-20250514"
+                                                  :max_tokens 500
+                                                  :temperature 0.0
+                                                  :messages [{:role "user"
+                                                             :content prompt}]})
+                                           :as :json
+                                           :socket-timeout 15000})
+
+                       content (get-in response [:body :content 0 :text])
+                       json-str (if (str/includes? content "```")
+                                 (second (re-find #"```(?:json)?\s*\n([\s\S]*?)\n```" content))
+                                 content)
+                       result (json/parse-string (or json-str content) true)]
+
+                   (when (:contradicts result)
+                     (patch/make-edge
+                      {:from (:db/id f1)
+                       :to (:db/id f2)
+                       :relation :contradicts
+                       :strength (:strength result 0.8)})))
+
+                 (catch Exception e
+                   (log/warn "Failed to check contradiction:" (.getMessage e))
+                   nil)))
+             candidates)))))
+
+;; ============================================================
+;; Enhanced AI: Relationship Extraction
+;; ============================================================
+
+(defn extract-relationships
+  "Extract semantic relationships between facts using Claude.
+
+   Returns a vector of edges (supports, contradicts, revises)."
+  [patch & {:keys [api-key batch-size]
+            :or {api-key *claude-api-key*
+                 batch-size 10}}]
+  (if (or (nil? api-key) (str/blank? api-key))
+    []
+    (let [facts (:patch/facts patch)
+          fact-texts (map :claim/text facts)
+          fact-ids (map :db/id facts)]
+
+      (log/info "Extracting relationships between" (count facts) "facts")
+
+      ;; Process facts in batches
+      (vec
+       (mapcat
+        (fn [batch-facts]
+          (try
+            (let [;; Create numbered list of facts
+                  facts-list (str/join "\n"
+                                      (map-indexed
+                                       (fn [i f] (str (inc i) ". " (:claim/text f)))
+                                       batch-facts))
+
+                  prompt (str "Analyze relationships between these factual claims.\n\n"
+                             "Facts:\n" facts-list "\n\n"
+                             "For each pair of related facts, identify the relationship type:\n"
+                             "- 'supports': One fact provides evidence for another\n"
+                             "- 'contradicts': Facts conflict with each other\n"
+                             "- 'revises': One fact updates/refines another\n\n"
+                             "Respond with JSON array:\n"
+                             "[{\"from\": 1, \"to\": 2, \"relation\": \"supports\", \"strength\": 0.8}]\n"
+                             "Only include strong relationships (strength > 0.6).")
+
+                  response (http/post "https://api.anthropic.com/v1/messages"
+                                     {:headers {"x-api-key" api-key
+                                               "anthropic-version" "2023-06-01"
+                                               "Content-Type" "application/json"}
+                                      :body (json/generate-string
+                                            {:model "claude-sonnet-4-20250514"
+                                             :max_tokens 2000
+                                             :temperature 0.0
+                                             :messages [{:role "user"
+                                                        :content prompt}]})
+                                      :as :json
+                                      :socket-timeout 30000})
+
+                  content (get-in response [:body :content 0 :text])
+                  json-str (if (str/includes? content "```")
+                            (second (re-find #"```(?:json)?\s*\n([\s\S]*?)\n```" content))
+                            content)
+                  relationships (json/parse-string (or json-str content) true)]
+
+              ;; Convert to edges
+              (map (fn [rel]
+                    (let [from-idx (dec (:from rel))
+                          to-idx (dec (:to rel))
+                          from-fact (nth batch-facts from-idx)
+                          to-fact (nth batch-facts to-idx)]
+                      (patch/make-edge
+                       {:from (:db/id from-fact)
+                        :to (:db/id to-fact)
+                        :relation (keyword (:relation rel))
+                        :strength (:strength rel 0.7)})))
+                   relationships))
+
+            (catch Exception e
+              (log/warn "Failed to extract relationships for batch:" (.getMessage e))
+              [])))
+        (partition-all batch-size facts))))))
+
+;; ============================================================
+;; Enhanced AI: Semantic Deduplication
+;; ============================================================
+
+(defn find-duplicates
+  "Find semantically duplicate facts using embeddings.
+
+   Returns a map of {canonical-id -> [duplicate-ids]}."
+  [patch & {:keys [similarity-threshold]
+            :or {similarity-threshold 0.92}}]
+  (let [facts (:patch/facts patch)
+        embeddings (:patch/embeddings patch)
+
+        ;; Build fact-id -> embedding map
+        embedding-map (into {} (map (fn [emb]
+                                     [(:claim-ref emb) (:vector emb)])
+                                   embeddings))
+
+        ;; Find similar fact pairs
+        duplicates (atom {})]
+
+    (doseq [f1 facts
+            f2 facts
+            :when (not= (:db/id f1) (:db/id f2))
+            :let [emb1 (get embedding-map (:db/id f1))
+                  emb2 (get embedding-map (:db/id f2))
+                  sim (when (and emb1 emb2) (cosine-similarity emb1 emb2))]
+            :when (and sim (>= sim similarity-threshold))]
+
+      ;; Choose canonical fact (higher confidence wins)
+      (let [canonical (if (>= (:claim/confidence f1) (:claim/confidence f2))
+                       (:db/id f1)
+                       (:db/id f2))
+            duplicate (if (= canonical (:db/id f1))
+                       (:db/id f2)
+                       (:db/id f1))]
+
+        (swap! duplicates update canonical
+               (fn [dups] (conj (or dups []) duplicate)))))
+
+    @duplicates))
+
+(defn merge-duplicates
+  "Merge duplicate facts, keeping the highest confidence version.
+
+   Returns updated patch with duplicates removed."
+  [patch duplicates]
+  (let [all-duplicate-ids (set (mapcat second duplicates))
+
+        ;; Keep only non-duplicate facts and canonical versions
+        kept-facts (filter #(not (contains? all-duplicate-ids (:db/id %)))
+                          (:patch/facts patch))
+
+        ;; Update edges to point to canonical facts
+        updated-edges (map (fn [edge]
+                            (let [from (:edge/from edge)
+                                  to (:edge/to edge)
+
+                                  ;; Find canonical IDs
+                                  canonical-from (or (some (fn [[canon dups]]
+                                                            (when (some #{from} dups) canon))
+                                                          duplicates)
+                                                    from)
+                                  canonical-to (or (some (fn [[canon dups]]
+                                                          (when (some #{to} dups) canon))
+                                                        duplicates)
+                                                  to)]
+                              (assoc edge
+                                     :edge/from canonical-from
+                                     :edge/to canonical-to)))
+                          (:patch/edges patch))]
+
+    (log/info "Merged" (count all-duplicate-ids) "duplicate facts into" (count duplicates) "canonical versions")
+
+    (assoc patch
+           :patch/facts kept-facts
+           :patch/edges updated-edges)))
+
+;; ============================================================
+;; Enhanced AI: Multi-modal Processing
+;; ============================================================
+
+(defn extract-from-image
+  "Extract text from images using OCR and analyze with Claude.
+
+   Returns extracted facts."
+  [image-path & {:keys [api-key]
+                 :or {api-key *claude-api-key*}}]
+  (if (or (nil? api-key) (str/blank? api-key))
+    []
+    (try
+      ;; Read image as base64
+      (let [image-bytes (with-open [in (java.io.FileInputStream. image-path)]
+                         (let [bytes (byte-array (.available in))]
+                           (.read in bytes)
+                           bytes))
+
+            image-b64 (-> (java.util.Base64/getEncoder)
+                         (.encodeToString image-bytes))
+
+            ;; Detect image type
+            image-type (cond
+                        (str/ends-with? image-path ".png") "image/png"
+                        (str/ends-with? image-path ".jpg") "image/jpeg"
+                        (str/ends-with? image-path ".jpeg") "image/jpeg"
+                        :else "image/png")
+
+            prompt "Extract all factual claims from this image (diagrams, charts, text, tables). Return as JSON array: [{\"text\": \"...\", \"confidence\": 0.8, \"topic\": \"...\""}]"
+
+            response (http/post "https://api.anthropic.com/v1/messages"
+                               {:headers {"x-api-key" api-key
+                                         "anthropic-version" "2023-06-01"
+                                         "Content-Type" "application/json"}
+                                :body (json/generate-string
+                                      {:model "claude-sonnet-4-20250514"
+                                       :max_tokens 4096
+                                       :temperature 0.0
+                                       :messages [{:role "user"
+                                                  :content [{:type "image"
+                                                            :source {:type "base64"
+                                                                    :media_type image-type
+                                                                    :data image-b64}}
+                                                           {:type "text"
+                                                            :text prompt}]}]})
+                                :as :json
+                                :socket-timeout 45000})
+
+            content (get-in response [:body :content 0 :text])
+            json-str (if (str/includes? content "```")
+                      (second (re-find #"```(?:json)?\s*\n([\s\S]*?)\n```" content))
+                      content)
+            facts-data (json/parse-string (or json-str content) true)]
+
+        (log/info "Extracted" (count facts-data) "facts from image:" image-path)
+
+        (vec
+         (map (fn [fact-data]
+               (patch/make-fact
+                {:text (:text fact-data)
+                 :confidence (or (:confidence fact-data) 0.6)
+                 :topic (keyword (or (:topic fact-data) "visual"))
+                 :source image-path}))
+              facts-data)))
+
+      (catch Exception e
+        (log/error "Failed to extract from image:" (.getMessage e))
+        []))))
+
+;; ============================================================
 ;; Example usage
 ;; ============================================================
 
@@ -467,4 +768,11 @@
   (def motives (extract-all-motives patch-with-emb))
 
   ;; Build motive graph
-  (def motive-graph (build-motive-graph motives)))
+  (def motive-graph (build-motive-graph motives))
+
+  ;; Enhanced AI features
+  (def contradictions (detect-contradictions patch-with-emb))
+  (def relationships (extract-relationships patch))
+  (def duplicates (find-duplicates patch-with-emb))
+  (def merged-patch (merge-duplicates patch duplicates))
+  (def image-facts (extract-from-image "diagram.png")))
