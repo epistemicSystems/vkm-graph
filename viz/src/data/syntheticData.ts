@@ -405,8 +405,10 @@ function patchToGraphData(patch: Patch): GraphData {
   return { nodes, links };
 }
 
-export function createTimelineSnapshots(): TimelineSnapshot[] {
-  return syntheticPatches.map((patch, index) => {
+export function createTimelineSnapshots(patches?: Patch[]): TimelineSnapshot[] {
+  const patchesToProcess = patches || syntheticPatches;
+
+  return patchesToProcess.map((patch, index) => {
     const graph = patchToGraphData(patch);
     const facts = patch['patch/facts'];
     const avgConfidence =

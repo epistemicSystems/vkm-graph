@@ -16,6 +16,7 @@ interface PatchGraphProps {
   height?: number;
   onNodeClick?: (nodeId: string) => void;
   onNodeHover?: (nodeId: string | null) => void;
+  svgRef?: React.RefObject<SVGSVGElement>;
 }
 
 export const PatchGraph: React.FC<PatchGraphProps> = ({
@@ -24,8 +25,10 @@ export const PatchGraph: React.FC<PatchGraphProps> = ({
   height = 600,
   onNodeClick,
   onNodeHover,
+  svgRef: externalSvgRef,
 }) => {
-  const svgRef = useRef<SVGSVGElement>(null);
+  const internalSvgRef = useRef<SVGSVGElement>(null);
+  const svgRef = externalSvgRef || internalSvgRef;
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
 
   useEffect(() => {
