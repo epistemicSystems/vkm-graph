@@ -1,0 +1,12 @@
+.git
+.env
+.env.*
+node_modules
+*.log
+.clj-kondo
+.lsp
+.cpcache
+target
+*.swp
+*.swo
+.DS_Store
